@@ -1,0 +1,197 @@
+Pycharm:
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+import os
+import uuid
+import shutil
+
+app = Flask(__name__)
+CORS(app)
+
+UPLOAD_FOLDER = "uploads"
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+mobiles = []
+
+def save_file(file):
+    path = os.path.join(UPLOAD_FOLDER, file.filename)
+    file.save(path)
+    return path
+
+
+@app.route("/mobiles", methods=["POST"])
+def create_mobile():
+    model = request.form.get("model")
+    price = request.form.get("price")
+
+    if not model or not price or "cover" not in request.files:
+        return jsonify({"message": "Required fields missing"}), 400
+
+    cover = save_file(request.files["cover"])
+
+    images = []
+    if "images" in request.files:
+        for img in request.files.getlist("images"):
+            images.append(save_file(img))
+
+    m = {
+        "id": str(uuid.uuid4()),
+        "model": model,
+        "price": price,
+        "cover": cover,
+        "images": images
+    }
+
+    mobiles.append(m)
+    return jsonify(m)
+
+
+@app.route("/mobiles", methods=["GET"])
+def get_mobiles():
+    return jsonify(mobiles)
+
+
+@app.route("/mobiles/<id>", methods=["PUT"])
+def update_mobile(id):
+    m = next((x for x in mobiles if x["id"] == id), None)
+    if not m:
+        return jsonify({"message": "Not Found"}), 404
+
+    m["model"] = request.form.get("model", m["model"])
+    m["price"] = request.form.get("price", m["price"])
+
+    if "cover" in request.files:
+        if os.path.exists(m["cover"]):
+            os.remove(m["cover"])
+        m["cover"] = save_file(request.files["cover"])
+
+    if "images" in request.files:
+        for p in m["images"]:
+            if os.path.exists(p):
+                os.remove(p)
+        m["images"] = [save_file(img) for img in request.files.getlist("images")]
+
+    return jsonify(m)
+
+
+@app.route("/mobiles/<id>", methods=["DELETE"])
+def delete_mobile(id):
+    global mobiles
+    m = next((x for x in mobiles if x["id"] == id), None)
+    if not m:
+        return jsonify({"message": "Not Found"}), 404
+
+    if os.path.exists(m["cover"]):
+        os.remove(m["cover"])
+
+    for img in m["images"]:
+        if os.path.exists(img):
+            os.remove(img)
+
+    mobiles = [x for x in mobiles if x["id"] != id]
+
+    return jsonify({"message": "Deleted"})
+
+
+@app.route("/uploads/<path:name>")
+def serve_file(name):
+    return app.send_static_file(os.path.join("../uploads", name))
+
+
+app.run(port=5000, debug=True)
+
+
+
+
+
+
+
+
+
+
+Vs code:
+
+import axios from "axios";
+import { useState, useEffect } from "react";
+
+const API = "http://localhost:5000";
+
+export default function App() {
+  const [mobiles, setMobiles] = useState([]);
+  const [form, setForm] = useState({
+    id: "",
+    model: "",
+    price: "",
+    cover: null,
+    images: [],
+  });
+
+  const load = async () =>
+    setMobiles((await axios.get(API + "/mobiles")).data);
+
+  useEffect(() => { load(); }, []);
+
+  const submit = async e => {
+    e.preventDefault();
+    const fd = new FormData();
+    fd.append("model", form.model);
+    fd.append("price", form.price);
+    if (form.cover) fd.append("cover", form.cover);
+    for (let img of form.images) fd.append("images", img);
+
+    form.id
+      ? await axios.put(API + "/mobiles/" + form.id, fd)
+      : await axios.post(API + "/mobiles", fd);
+
+    setForm({ id: "", model: "", price: "", cover: null, images: [] });
+    load();
+  };
+
+  const del = async id => {
+    await axios.delete(API + "/mobiles/" + id);
+    load();
+  };
+
+  const edit = m => {
+    setForm({ id: m.id, model: m.model, price: m.price });
+  };
+
+  return (
+    <div style={{ padding: 30 }}>
+      <h2>Mobile Management</h2>
+
+      <form onSubmit={submit}>
+        <input
+          placeholder="Model"
+          value={form.model}
+          onChange={e => setForm({ ...form, model: e.target.value })}
+          required
+        />
+        <input
+          placeholder="Price"
+          value={form.price}
+          onChange={e => setForm({ ...form, price: e.target.value })}
+          required
+        />
+        <input type="file" onChange={e => setForm({ ...form, cover: e.target.files[0] })} />
+        <input type="file" multiple onChange={e => setForm({ ...form, images: e.target.files })} />
+
+        <button type="submit">
+          {form.id ? "Update" : "Add"}
+        </button>
+      </form>
+
+      <hr />
+
+      {mobiles.map(m => (
+        <div key={m.id} style={{ border: "1px solid gray", margin: 10, padding: 10 }}>
+          <img src={API + "/" + m.cover} width={120} alt="" />
+          <h3>{m.model} — Rs.{m.price}</h3>
+
+          <button onClick={() => edit(m)}>Edit</button>
+          <button onClick={() => del(m.id)}>Delete</button>
+        </div>
+      ))}
+    </div>
+  );
+}
